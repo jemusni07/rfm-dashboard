@@ -1251,7 +1251,9 @@ def create_landing_page():
                                         html.H5("📊 Data Source", className="text-primary mb-2"),
                                         html.P([html.Strong("UCI Repository"), " → Historical retail transactions (2009-2011)"]),
                                         html.P([html.Strong("GitHub Actions"), " → Automated daily file uploads"]),
-                                        html.P([html.Strong("AWS S3"), " → Raw data lake storage"])
+                                        html.P([html.Strong("AWS S3"), " → Raw data lake storage"]),
+                                        html.Hr(),
+                                        html.P([html.Em("Note: Historical dates shifted to current period (2025-2026) to simulate real-time daily retail transactions.")], className="text-muted small")
                                     ])
                                 ], color="light", className="h-100")
                             ], width=4),
