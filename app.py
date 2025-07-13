@@ -110,14 +110,30 @@ def load_quality_data():
         print(f"Error loading quality data: {str(e)}")
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
-# Load the data from Delta tables
-data = load_data()
-lineage_data = load_lineage_data()
-dq_comparison, daily_counts, bronze_quality = load_quality_data()
+# Initialize global variables for data
+data = None
+lineage_data = None
+dq_comparison = None
+daily_counts = None
+bronze_quality = None
 
-if data is None:
-    print("Error: Could not load RFM data from Databricks. Please check your DATABRICKS_WAREHOUSE_ID environment variable.")
-    exit()
+def refresh_all_data():
+    """Refresh all data from warehouse."""
+    global data, lineage_data, dq_comparison, daily_counts, bronze_quality
+    
+    print("🔄 Refreshing data from warehouse...")
+    data = load_data()
+    lineage_data = load_lineage_data()
+    dq_comparison, daily_counts, bronze_quality = load_quality_data()
+    
+    if data is None:
+        print("Error: Could not load RFM data from Databricks. Please check your DATABRICKS_WAREHOUSE_ID environment variable.")
+        exit()
+    
+    print("✅ Data refresh completed successfully")
+
+# Load the data from Delta tables on startup
+refresh_all_data()
 
 def get_node_type_and_layer(node_name):
     """Determine node type and layer for positioning."""
@@ -1044,7 +1060,7 @@ server = app.server  # For deployment
 
 # Define the app layout with navigation
 app.layout = dbc.Container([
-    # Navigation
+    # Navigation and refresh controls
     dbc.Row([
         dbc.Col([
             dbc.Nav([
@@ -1052,6 +1068,22 @@ app.layout = dbc.Container([
                 dbc.NavItem(dbc.NavLink("Data Quality", href="#", id="quality-tab", active=False)),
                 dbc.NavItem(dbc.NavLink("Data Lineage", href="#", id="lineage-tab", active=False)),
             ], pills=True, className="mb-4")
+        ], width=10),
+        dbc.Col([
+            dbc.Button(
+                "🔄 Refresh Data", 
+                id="refresh-button", 
+                color="primary", 
+                size="sm",
+                className="mb-4"
+            )
+        ], width=2, className="text-end")
+    ]),
+    
+    # Refresh status indicator
+    dbc.Row([
+        dbc.Col([
+            html.Div(id="refresh-status")
         ], width=12)
     ]),
     
@@ -1061,33 +1093,45 @@ app.layout = dbc.Container([
 
 # Callbacks
 @app.callback(
-    [Output('analytics-tab', 'active'),
+    [Output('refresh-status', 'children'),
+     Output('analytics-tab', 'active'),
      Output('quality-tab', 'active'),
      Output('lineage-tab', 'active'),
      Output('page-content', 'children')],
-    [Input('analytics-tab', 'n_clicks'),
+    [Input('refresh-button', 'n_clicks'),
+     Input('analytics-tab', 'n_clicks'),
      Input('quality-tab', 'n_clicks'),
      Input('lineage-tab', 'n_clicks')]
 )
-def update_page(analytics_clicks, quality_clicks, lineage_clicks):
+def update_page(refresh_clicks, analytics_clicks, quality_clicks, lineage_clicks):
     ctx = callback_context
+    
+    refresh_status = ""
+    
+    # Handle refresh button click
+    if ctx.triggered and ctx.triggered[0]['prop_id'] == 'refresh-button.n_clicks':
+        refresh_all_data()
+        refresh_status = dbc.Alert("✅ Data refreshed successfully!", color="success", dismissable=True, duration=4000)
     
     # If no button has been clicked yet, show analytics page
     if not ctx.triggered:
-        return True, False, False, create_analytics_page()
+        return refresh_status, True, False, False, create_analytics_page()
     
     # Get which button was clicked
     button_id = ctx.triggered[0]['prop_id'].split('.')[0]
     
     if button_id == 'analytics-tab':
-        return True, False, False, create_analytics_page()
+        return refresh_status, True, False, False, create_analytics_page()
     elif button_id == 'quality-tab':
-        return False, True, False, create_quality_page()
+        return refresh_status, False, True, False, create_quality_page()
     elif button_id == 'lineage-tab':
-        return False, False, True, create_lineage_page()
+        return refresh_status, False, False, True, create_lineage_page()
+    elif button_id == 'refresh-button':
+        # Keep current page active after refresh
+        return refresh_status, True, False, False, create_analytics_page()
     
     # Default to analytics page
-    return True, False, False, create_analytics_page()
+    return refresh_status, True, False, False, create_analytics_page()
 
 @app.callback(
     Output('3d-scatter', 'figure'),

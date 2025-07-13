@@ -4,7 +4,7 @@ Simple script to run the Retail Pipeline Dashboard locally.
 """
 
 import os
-from app import app
+from app import app, refresh_all_data
 
 if __name__ == "__main__":
     port = int(os.environ.get('PORT', 8050))
@@ -13,6 +13,10 @@ if __name__ == "__main__":
     print(f"🚀 Starting Retail Pipeline Dashboard...")
     print(f"📊 Dashboard will be available at: http://localhost:{port}")
     print(f"🔧 Debug mode: {'ON' if debug else 'OFF'}")
+    
+    # Ensure fresh data on app startup
+    print("🔄 Loading fresh data from warehouse...")
+    refresh_all_data()
     
     app.run(
         debug=debug,
