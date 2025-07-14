@@ -6,6 +6,8 @@ A comprehensive data engineering project demonstrating the complete data lifecyc
 
 ## Project Overview
 
+Project Repository: [https://github.com/jemusni07/retail-pipeline](https://github.com/jemusni07/retail-pipeline)
+
 This data engineering project showcases a full-stack implementation covering:
 
 - **Data Ingestion Layer**: Automated daily batch processing from S3
