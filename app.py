@@ -393,27 +393,37 @@ def create_architecture_flow():
         }
     ]
     
-    return cyto.Cytoscape(
-        id='architecture-flow-cytoscape',
-        elements=elements,
-        layout={
-            'name': 'preset',
-            'padding': 50,
-            'animate': True,
-            'animationDuration': 500
-        },
-        style={
-            'width': '100%',
-            'height': '500px',
-            'border': '1px solid #ddd',
-            'border-radius': '5px'
-        },
-        stylesheet=stylesheet,
-        responsive=True,
-        minZoom=0.2,
-        maxZoom=2.0,
-        wheelSensitivity=0.1
-    )
+    return html.Div([
+        cyto.Cytoscape(
+            id='architecture-flow-cytoscape',
+            elements=elements,
+            layout={
+                'name': 'preset',
+                'padding': 30,  # Reduced padding for mobile
+                'animate': True,
+                'animationDuration': 500
+            },
+            style={
+                'width': '100%',
+                'height': '500px',
+                'border': '1px solid #ddd',
+                'border-radius': '5px'
+            },
+            stylesheet=stylesheet,
+            responsive=True,
+            minZoom=0.1,  # Allow more zoom out for mobile
+            maxZoom=3.0,  # Allow more zoom in for mobile
+            wheelSensitivity=0.1
+        ),
+        # Mobile-friendly controls and info
+        html.Div([
+            dbc.Alert([
+                html.I(className="fas fa-mobile-alt me-2"),
+                html.Strong("Mobile Tip: "),
+                "Pinch to zoom, drag to pan. Tap nodes for details."
+            ], color="info", className="d-md-none mt-2 mb-0", style={"fontSize": "0.85rem"})
+        ])
+    ])
 
 def create_cytoscape_lineage():
     """Create data lineage visualization using Cytoscape."""
@@ -2569,7 +2579,7 @@ def create_architecture_page():
                         html.H6("🎨 Color Legend", className="mb-2"),
                         dbc.Row([
                             dbc.Col([
-                                html.H6("🌟 Core Architecture", className="small fw-bold text-primary mb-2"),
+                                html.H6("🌟 Core Architecture", className="small fw-bold text-primary mb-2 architecture-legend"),
                                 html.Div([
                                     html.Span("🟤", style={'fontSize': '16px', 'marginRight': '8px'}),
                                     html.Span("Bronze Layer", className="small fw-bold")
@@ -2586,9 +2596,9 @@ def create_architecture_page():
                                     html.Span("🟣", style={'fontSize': '16px', 'marginRight': '8px'}),
                                     html.Span("ML Analytics", className="small fw-bold")
                                 ])
-                            ], width=6),
+                            ], width=12, md=6),
                             dbc.Col([
-                                html.H6("🔘 Supporting Layers", className="small fw-bold text-muted mb-2"),
+                                html.H6("🔘 Supporting Layers", className="small fw-bold text-muted mb-2 architecture-legend"),
                                 html.Div([
                                     html.Span("⚫", style={'fontSize': '16px', 'marginRight': '8px'}),
                                     html.Span("Data Ingestion", className="small text-muted")
@@ -2601,7 +2611,7 @@ def create_architecture_page():
                                     html.Span("⚫", style={'fontSize': '16px', 'marginRight': '8px'}),
                                     html.Span("Data Governance", className="small text-muted")
                                 ])
-                            ], width=6)
+                            ], width=12, md=6)
                         ])
                     ])
                 ])
@@ -2638,7 +2648,7 @@ def create_architecture_page():
                                     html.Strong("Implementation: "), 
                                     html.Code("dlt_scripts/01_bronze_layer.py", className="text-muted")
                                 ], className="small")
-                            ], width=4),
+                            ], width=12, lg=4, className="mb-3 mb-lg-0"),
                             dbc.Col([
                                 html.H6("🥈 Silver Layer - Cleaned & Validated", className="text-secondary mb-2"),
                                 html.Ul([
@@ -2651,7 +2661,7 @@ def create_architecture_page():
                                     html.Strong("Implementation: "), 
                                     html.Code("dlt_scripts/02_silver_layer.py", className="text-muted")
                                 ], className="small")
-                            ], width=4),
+                            ], width=12, lg=4, className="mb-3 mb-lg-0"),
                             dbc.Col([
                                 html.H6("🥇 Gold Layer - Business Analytics", className="text-warning mb-2"),
                                 html.Ul([
@@ -2664,7 +2674,7 @@ def create_architecture_page():
                                     html.Strong("Implementation: "), 
                                     html.Code("dlt_scripts/05_customer_rfm_gold.sql", className="text-muted")
                                 ], className="small")
-                            ], width=4)
+                            ], width=12, lg=4, className="mb-3 mb-lg-0")
                         ])
                     ])
                 ])
@@ -2690,7 +2700,7 @@ def create_architecture_page():
                                     html.Li("CloudFiles streaming for real-time processing"),
                                     html.Li("External data source integration")
                                 ])
-                            ], width=6),
+                            ], width=12, md=6, className="mb-3 mb-md-0"),
                             dbc.Col([
                                 html.H6("🔧 Data Processing Layer", className="text-success mb-2"),
                                 html.Ul([
@@ -2699,7 +2709,7 @@ def create_architecture_page():
                                     html.Li("Automated schema evolution and data lineage"),
                                     html.Li("Error handling and data rescue capabilities")
                                 ])
-                            ], width=6)
+                            ], width=12, md=6, className="mb-3 mb-md-0")
                         ], className="mb-3"),
                         
                         dbc.Row([
@@ -2711,7 +2721,7 @@ def create_architecture_page():
                                     html.Li("Optimized storage with auto-compaction"),
                                     html.Li("Unity Catalog for governance and discovery")
                                 ])
-                            ], width=6),
+                            ], width=12, md=6, className="mb-3 mb-md-0"),
                             dbc.Col([
                                 html.H6("📊 Analytics & Application Layer", className="text-danger mb-2"),
                                 html.Ul([
@@ -2720,7 +2730,7 @@ def create_architecture_page():
                                     html.Li("Materialized customer segments for business use"),
                                     html.Li("Interactive dashboard for real-time insights")
                                 ])
-                            ], width=6)
+                            ], width=12, md=6, className="mb-3 mb-md-0")
                         ])
                     ])
                 ])
@@ -3225,7 +3235,17 @@ app.index_string = '''
                 border: 1px solid rgba(0,0,0,0.05);
                 margin-bottom: 2rem;
             }
-            @media (max-width: 768px) {
+            /* Responsive Design */
+            @media (max-width: 1200px) {
+                .sidebar {
+                    width: 250px;
+                }
+                .main-content {
+                    margin-left: 250px;
+                }
+            }
+            
+            @media (max-width: 992px) {
                 .sidebar {
                     position: fixed;
                     top: 0;
@@ -3238,10 +3258,109 @@ app.index_string = '''
                     left: 0;
                 }
                 .main-content {
+                    margin-left: 0 !important;
                     padding: 1rem;
+                }
+                .page-header {
+                    padding: 1.5rem;
+                    margin-bottom: 1.5rem;
+                }
+                .page-title {
+                    font-size: 1.75rem;
+                }
+                .chart-container {
+                    padding: 1rem;
+                    margin-bottom: 1.5rem;
+                }
+            }
+            
+            @media (max-width: 768px) {
+                .main-content {
+                    padding: 0.75rem;
+                    padding-top: 4rem; /* Account for mobile menu button */
                 }
                 .metric-card {
                     margin-bottom: 1rem;
+                    padding: 1rem;
+                }
+                .metric-value {
+                    font-size: 2rem;
+                }
+                .page-header {
+                    padding: 1rem;
+                    margin-bottom: 1rem;
+                }
+                .page-title {
+                    font-size: 1.5rem;
+                }
+                .chart-container {
+                    padding: 0.75rem;
+                    margin-bottom: 1rem;
+                }
+                .filter-panel {
+                    padding: 1rem;
+                    margin-bottom: 1rem;
+                }
+                /* Responsive tables */
+                .ag-theme-alpine {
+                    font-size: 12px;
+                }
+                /* Better touch targets */
+                .nav-link {
+                    padding: 1rem 1.5rem;
+                    font-size: 1rem;
+                    min-height: 44px; /* iOS touch target recommendation */
+                }
+                .refresh-button {
+                    padding: 0.75rem 1rem;
+                    font-size: 1rem;
+                    min-height: 44px;
+                }
+                /* Mobile menu improvements */
+                #mobile-menu-toggle {
+                    min-width: 44px;
+                    min-height: 44px;
+                }
+            }
+            
+            @media (max-width: 576px) {
+                .main-content {
+                    padding: 0.5rem;
+                    padding-top: 4rem;
+                }
+                .metric-card {
+                    padding: 0.75rem;
+                }
+                .metric-value {
+                    font-size: 1.75rem;
+                }
+                .page-header {
+                    padding: 0.75rem;
+                }
+                .page-title {
+                    font-size: 1.25rem;
+                }
+                .chart-container {
+                    padding: 0.5rem;
+                }
+                .filter-panel {
+                    padding: 0.75rem;
+                }
+                /* Stack metric cards vertically on small screens */
+                .row .col-lg-3, .row .col-md-4, .row .col-sm-6 {
+                    margin-bottom: 0.75rem;
+                }
+                /* Mobile-specific architecture adjustments */
+                #architecture-flow-cytoscape {
+                    height: 350px !important;
+                    font-size: 10px !important;
+                }
+                /* Make text in architecture diagram smaller on mobile */
+                .architecture-legend {
+                    font-size: 0.75rem;
+                }
+                .card-header h4 {
+                    font-size: 1.1rem;
                 }
             }
         </style>
@@ -3773,7 +3892,7 @@ def display_architecture_node_info(selected_nodes):
     return dbc.Card([
         dbc.CardHeader([
             html.H5(f"📋 {node_label.split()[0]} Details", className="mb-0")
-        ], color=color, inverse=True),
+        ]),
         dbc.CardBody([
             html.P([
                 html.Strong("Component: "), 
