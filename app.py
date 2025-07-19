@@ -1,13 +1,19 @@
 import pandas as pd
 import dash
-from dash import dcc, html, Input, Output, callback_context
+from dash import dcc, html, Input, Output, callback_context, State
 import plotly.express as px
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import dash_bootstrap_components as dbc
 import dash_ag_grid as dag
 import dash_cytoscape as cyto
 import os
 import json
+import numpy as np
+from datetime import datetime, timedelta
+import base64
+import io
+# from scipy import stats  # Optional for advanced statistical analysis
 
 # Load environment variables from .env file if it exists
 try:
@@ -387,27 +393,37 @@ def create_architecture_flow():
         }
     ]
     
-    return cyto.Cytoscape(
-        id='architecture-flow-cytoscape',
-        elements=elements,
-        layout={
-            'name': 'preset',
-            'padding': 50,
-            'animate': True,
-            'animationDuration': 500
-        },
-        style={
-            'width': '100%',
-            'height': '500px',
-            'border': '1px solid #ddd',
-            'border-radius': '5px'
-        },
-        stylesheet=stylesheet,
-        responsive=True,
-        minZoom=0.2,
-        maxZoom=2.0,
-        wheelSensitivity=0.1
-    )
+    return html.Div([
+        cyto.Cytoscape(
+            id='architecture-flow-cytoscape',
+            elements=elements,
+            layout={
+                'name': 'preset',
+                'padding': 30,  # Reduced padding for mobile
+                'animate': True,
+                'animationDuration': 500
+            },
+            style={
+                'width': '100%',
+                'height': '500px',
+                'border': '1px solid #ddd',
+                'border-radius': '5px'
+            },
+            stylesheet=stylesheet,
+            responsive=True,
+            minZoom=0.1,  # Allow more zoom out for mobile
+            maxZoom=3.0,  # Allow more zoom in for mobile
+            wheelSensitivity=0.1
+        ),
+        # Mobile-friendly controls and info
+        html.Div([
+            dbc.Alert([
+                html.I(className="fas fa-mobile-alt me-2"),
+                html.Strong("Mobile Tip: "),
+                "Pinch to zoom, drag to pan. Tap nodes for details."
+            ], color="info", className="d-md-none mt-2 mb-0", style={"fontSize": "0.85rem"})
+        ])
+    ])
 
 def create_cytoscape_lineage():
     """Create data lineage visualization using Cytoscape."""
@@ -1004,10 +1020,8 @@ def create_3d_scatter(selected_clusters=None):
     """Create 3D scatter plot of RFM clusters."""
     filtered_data = data[data['Cluster'].isin(selected_clusters)] if selected_clusters else data
     
-    # Define colors for clusters - create a comprehensive color map
-    unique_clusters = sorted(data['Cluster'].unique())
-    color_palette = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
-    color_discrete_map = {cluster: color_palette[i % len(color_palette)] for i, cluster in enumerate(unique_clusters)}
+    # Use centralized color mapping for consistency across all charts
+    color_discrete_map = get_cluster_color_map()
     
     # Create cluster description mapping
     cluster_descriptions = data[['Cluster', 'Cluster_Description']].drop_duplicates().set_index('Cluster')['Cluster_Description']
@@ -1071,10 +1085,8 @@ def create_cluster_distribution():
     """Create cluster distribution chart."""
     cluster_counts = data.groupby(['Cluster', 'Cluster_Description']).size().reset_index(name='Count')
     
-    # Use the same color mapping as the 3D scatter
-    unique_clusters = sorted(data['Cluster'].unique())
-    color_palette = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
-    color_discrete_map = {cluster: color_palette[i % len(color_palette)] for i, cluster in enumerate(unique_clusters)}
+    # Use centralized color mapping for consistency across all charts
+    color_discrete_map = get_cluster_color_map()
     
     # Convert Cluster to string to ensure consistent color mapping
     cluster_counts = cluster_counts.copy()
@@ -1098,34 +1110,938 @@ def create_cluster_distribution():
     return fig
 
 def create_monetary_analysis():
-    """Create monetary value analysis by cluster."""
-    # Use the same color mapping as other charts
-    unique_clusters = sorted(data['Cluster'].unique())
-    color_palette = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
-    color_discrete_map = {cluster: color_palette[i % len(color_palette)] for i, cluster in enumerate(unique_clusters)}
+    """Create separate monetary value analysis plots for each segment."""
+    import math
     
-    # Convert Cluster to string to ensure consistent color mapping
-    data_copy = data.copy()
-    data_copy['Cluster_str'] = data_copy['Cluster'].astype(str)
+    # Use centralized color mapping for consistency across all charts
+    color_discrete_map = get_cluster_color_map()
     
-    # Create string-based color map
-    color_discrete_map_str = {str(k): v for k, v in color_discrete_map.items()}
+    # Get cluster descriptions if available
+    cluster_descriptions = {}
+    if 'Cluster_Description' in data.columns:
+        cluster_descriptions = data[['Cluster', 'Cluster_Description']].drop_duplicates().set_index('Cluster')['Cluster_Description'].to_dict()
     
-    fig = px.box(
-        data_copy, 
-        x='Cluster_Description', 
-        y='Monetary', 
-        color='Cluster_str',
-        color_discrete_map=color_discrete_map_str,
-        title='Monetary Value Distribution by Segment',
-        labels={'Cluster_str': 'Cluster'}
+    # Calculate number of rows and columns for subplots
+    n_clusters = len(unique_clusters)
+    n_cols = min(3, n_clusters)  # Max 3 columns
+    n_rows = math.ceil(n_clusters / n_cols)
+    
+    # Create subplots
+    fig = make_subplots(
+        rows=n_rows, 
+        cols=n_cols,
+        subplot_titles=[cluster_descriptions.get(cluster, f'Cluster {cluster}') for cluster in unique_clusters],
+        vertical_spacing=0.12,
+        horizontal_spacing=0.08
     )
-    fig.update_layout(height=400, showlegend=False)
-    fig.update_xaxes(tickangle=45)
+    
+    # Add box plot for each cluster
+    for i, cluster in enumerate(unique_clusters):
+        row = (i // n_cols) + 1
+        col = (i % n_cols) + 1
+        
+        cluster_data = data[data['Cluster'] == cluster]['Monetary']
+        
+        # Add box plot
+        fig.add_trace(
+            go.Box(
+                y=cluster_data,
+                name=f'Cluster {cluster}',
+                marker_color=color_discrete_map[cluster],
+                showlegend=False,
+                boxpoints='outliers',  # Show outlier points
+                jitter=0.3,
+                pointpos=-1.8
+            ),
+            row=row, col=col
+        )
+        
+        # Add statistics annotation
+        stats_text = f"Count: {len(cluster_data)}<br>" + \
+                    f"Median: ${cluster_data.median():,.0f}<br>" + \
+                    f"Mean: ${cluster_data.mean():,.0f}<br>" + \
+                    f"Max: ${cluster_data.max():,.0f}"
+        
+        fig.add_annotation(
+            text=stats_text,
+            xref=f"x{i+1}", yref=f"y{i+1}",
+            x=0.5, y=0.95,
+            xanchor='center', yanchor='top',
+            showarrow=False,
+            font=dict(size=10, color='gray'),
+            bgcolor='rgba(255,255,255,0.8)',
+            bordercolor='gray',
+            borderwidth=1,
+            row=row, col=col
+        )
+    
+    # Update layout
+    fig.update_layout(
+        title=dict(
+            text='Monetary Value Distribution by Segment',
+            font=dict(size=16, family="Segoe UI")
+        ),
+        height=200 * n_rows + 100,  # Dynamic height based on number of rows
+        showlegend=False,
+        plot_bgcolor='rgba(0,0,0,0)',
+        paper_bgcolor='rgba(0,0,0,0)',
+        font=dict(family="Segoe UI", size=10)
+    )
+    
+    # Update all y-axes to show currency format
+    for i in range(1, n_clusters + 1):
+        fig.update_yaxes(
+            title_text="Monetary Value ($)" if i <= n_cols else "",  # Only show y-axis title on first row
+            tickformat='$,.0f',
+            row=(i-1)//n_cols + 1, 
+            col=(i-1)%n_cols + 1
+        )
+    
+    # Remove x-axis labels since we have subplot titles
+    fig.update_xaxes(showticklabels=False)
+    
     return fig
 
-# Landing page layout
+def create_frequency_analysis():
+    """Create separate frequency analysis plots for each segment."""
+    import math
+    
+    # Use centralized color mapping for consistency across all charts
+    color_discrete_map = get_cluster_color_map()
+    
+    # Get cluster descriptions if available
+    cluster_descriptions = {}
+    if 'Cluster_Description' in data.columns:
+        cluster_descriptions = data[['Cluster', 'Cluster_Description']].drop_duplicates().set_index('Cluster')['Cluster_Description'].to_dict()
+    
+    # Calculate number of rows and columns for subplots
+    n_clusters = len(unique_clusters)
+    n_cols = min(3, n_clusters)  # Max 3 columns
+    n_rows = math.ceil(n_clusters / n_cols)
+    
+    # Create subplots
+    fig = make_subplots(
+        rows=n_rows, 
+        cols=n_cols,
+        subplot_titles=[cluster_descriptions.get(cluster, f'Cluster {cluster}') for cluster in unique_clusters],
+        vertical_spacing=0.12,
+        horizontal_spacing=0.08
+    )
+    
+    # Add histogram for each cluster
+    for i, cluster in enumerate(unique_clusters):
+        row = (i // n_cols) + 1
+        col = (i % n_cols) + 1
+        
+        cluster_data = data[data['Cluster'] == cluster]['Frequency']
+        
+        # Add histogram
+        fig.add_trace(
+            go.Histogram(
+                x=cluster_data,
+                name=f'Cluster {cluster}',
+                marker_color=color_discrete_map[cluster],
+                showlegend=False,
+                opacity=0.7,
+                nbinsx=min(20, len(cluster_data.unique()))  # Adaptive bin count
+            ),
+            row=row, col=col
+        )
+        
+        # Add statistics annotation
+        stats_text = f"Count: {len(cluster_data)}<br>" + \
+                    f"Median: {cluster_data.median():.1f}<br>" + \
+                    f"Mean: {cluster_data.mean():.1f}<br>" + \
+                    f"Max: {cluster_data.max()}"
+        
+        fig.add_annotation(
+            text=stats_text,
+            xref=f"x{i+1}", yref=f"y{i+1}",
+            x=0.95, y=0.95,
+            xanchor='right', yanchor='top',
+            showarrow=False,
+            font=dict(size=10, color='gray'),
+            bgcolor='rgba(255,255,255,0.8)',
+            bordercolor='gray',
+            borderwidth=1,
+            row=row, col=col
+        )
+    
+    # Update layout
+    fig.update_layout(
+        title=dict(
+            text='Purchase Frequency Distribution by Segment',
+            font=dict(size=16, family="Segoe UI")
+        ),
+        height=200 * n_rows + 100,
+        showlegend=False,
+        plot_bgcolor='rgba(0,0,0,0)',
+        paper_bgcolor='rgba(0,0,0,0)',
+        font=dict(family="Segoe UI", size=10)
+    )
+    
+    # Update all axes
+    for i in range(1, n_clusters + 1):
+        fig.update_xaxes(
+            title_text="Number of Orders" if i > (n_rows-1)*n_cols else "",  # Only show x-axis title on last row
+            row=(i-1)//n_cols + 1, 
+            col=(i-1)%n_cols + 1
+        )
+        fig.update_yaxes(
+            title_text="Customer Count" if i <= n_cols else "",  # Only show y-axis title on first row
+            row=(i-1)//n_cols + 1, 
+            col=(i-1)%n_cols + 1
+        )
+    
+    return fig
+
+def create_recency_analysis():
+    """Create separate recency analysis plots for each segment."""
+    import math
+    
+    # Use centralized color mapping for consistency across all charts
+    color_discrete_map = get_cluster_color_map()
+    
+    # Get cluster descriptions if available
+    cluster_descriptions = {}
+    if 'Cluster_Description' in data.columns:
+        cluster_descriptions = data[['Cluster', 'Cluster_Description']].drop_duplicates().set_index('Cluster')['Cluster_Description'].to_dict()
+    
+    # Calculate number of rows and columns for subplots
+    n_clusters = len(unique_clusters)
+    n_cols = min(3, n_clusters)  # Max 3 columns
+    n_rows = math.ceil(n_clusters / n_cols)
+    
+    # Create subplots
+    fig = make_subplots(
+        rows=n_rows, 
+        cols=n_cols,
+        subplot_titles=[cluster_descriptions.get(cluster, f'Cluster {cluster}') for cluster in unique_clusters],
+        vertical_spacing=0.12,
+        horizontal_spacing=0.08
+    )
+    
+    # Add box plot for each cluster
+    for i, cluster in enumerate(unique_clusters):
+        row = (i // n_cols) + 1
+        col = (i % n_cols) + 1
+        
+        cluster_data = data[data['Cluster'] == cluster]['Recency']
+        
+        # Add box plot
+        fig.add_trace(
+            go.Box(
+                y=cluster_data,
+                name=f'Cluster {cluster}',
+                marker_color=color_discrete_map[cluster],
+                showlegend=False,
+                boxpoints='outliers',
+                jitter=0.3,
+                pointpos=-1.8
+            ),
+            row=row, col=col
+        )
+        
+        # Add statistics annotation
+        stats_text = f"Count: {len(cluster_data)}<br>" + \
+                    f"Median: {cluster_data.median():.0f} days<br>" + \
+                    f"Mean: {cluster_data.mean():.0f} days<br>" + \
+                    f"Min: {cluster_data.min()} days"
+        
+        fig.add_annotation(
+            text=stats_text,
+            xref=f"x{i+1}", yref=f"y{i+1}",
+            x=0.5, y=0.95,
+            xanchor='center', yanchor='top',
+            showarrow=False,
+            font=dict(size=10, color='gray'),
+            bgcolor='rgba(255,255,255,0.8)',
+            bordercolor='gray',
+            borderwidth=1,
+            row=row, col=col
+        )
+    
+    # Update layout
+    fig.update_layout(
+        title=dict(
+            text='Days Since Last Purchase by Segment',
+            font=dict(size=16, family="Segoe UI")
+        ),
+        height=200 * n_rows + 100,
+        showlegend=False,
+        plot_bgcolor='rgba(0,0,0,0)',
+        paper_bgcolor='rgba(0,0,0,0)',
+        font=dict(family="Segoe UI", size=10)
+    )
+    
+    # Update all y-axes
+    for i in range(1, n_clusters + 1):
+        fig.update_yaxes(
+            title_text="Days Since Last Purchase" if i <= n_cols else "",
+            row=(i-1)//n_cols + 1, 
+            col=(i-1)%n_cols + 1
+        )
+    
+    # Remove x-axis labels since we have subplot titles
+    fig.update_xaxes(showticklabels=False)
+    
+    return fig
+
+# Executive Dashboard page with key metrics and insights
+def create_dashboard_page():
+    if data is None:
+        return html.Div([
+            dbc.Alert("No data available. Please refresh to load data.", color="warning")
+        ])
+    
+
+    # Helper function to safely convert to numeric
+    def safe_numeric_operation(series, operation='mean'):
+        """Safely perform numeric operations on series that might contain Decimal types."""
+        try:
+            numeric_series = pd.to_numeric(series, errors='coerce')
+            if numeric_series.isna().all():
+                return 0
+            
+            if operation == 'mean':
+                return float(numeric_series.mean())
+            elif operation == 'median':
+                return float(numeric_series.median())
+            elif operation == 'min':
+                return float(numeric_series.min())
+            elif operation == 'max':
+                return float(numeric_series.max())
+            else:
+                return float(numeric_series.mean())
+        except Exception:
+            return 0
+    
+    # Debug: Check available columns and segment info
+    print(f"Available columns: {list(data.columns)}")
+    
+    # Calculate key metrics - use flexible column names
+    total_customers = len(data)
+    
+    # Try different possible column names first
+    cluster_col = None
+    for col in ['Cluster', 'cluster', 'segment_id', 'cluster_id']:
+        if col in data.columns:
+            cluster_col = col
+            break
+    
+    total_clusters = len(data[cluster_col].unique()) if cluster_col else 0
+    
+    # Try different possible monetary column names
+    monetary_col = None
+    for col in ['Monetary', 'monetary', 'total_spend', 'revenue', 'TotalSpend']:
+        if col in data.columns:
+            monetary_col = col
+            break
+    
+    # Try different possible recency column names
+    recency_col = None
+    for col in ['Recency', 'recency', 'days_since_last_purchase']:
+        if col in data.columns:
+            recency_col = col
+            break
+    
+    # Try different possible frequency column names
+    frequency_col = None
+    for col in ['Frequency', 'frequency', 'order_count', 'purchase_count']:
+        if col in data.columns:
+            frequency_col = col
+            break
+    
+    # Debug segment information
+    if 'Cluster_Description' in data.columns:
+        print(f"Available Cluster Descriptions: {data['Cluster_Description'].unique()[:5]}")
+    if 'Segment' in data.columns:
+        print(f"Available Segments: {data['Segment'].unique()[:5]}")
+    if 'Cluster' in data.columns:
+        print(f"Available Clusters: {data['Cluster'].unique()[:5]}")
+    
+    # Debug revenue data
+    if monetary_col:
+        revenue_debug = data.groupby(data.columns[data.columns.str.contains('Cluster|Segment', case=False)][0] if any(data.columns.str.contains('Cluster|Segment', case=False)) else data.columns[0])[monetary_col].sum()
+        print(f"Revenue by segment (debug): {revenue_debug.to_dict()}")
+    
+    # Use safe numeric operations to calculate averages
+    avg_monetary = safe_numeric_operation(data[monetary_col]) if monetary_col else 0
+    avg_recency = safe_numeric_operation(data[recency_col]) if recency_col else 0
+    avg_frequency = safe_numeric_operation(data[frequency_col]) if frequency_col else 0
+    
+    # Try different possible segment column names
+    segment_col = None
+    for col in ['Segment', 'segment', 'customer_segment', 'segment_name', 'SegmentName']:
+        if col in data.columns:
+            segment_col = col
+            break
+    
+    # Use actual segment names from data source, prioritize description columns
+    display_col = None
+    group_col = None
+    
+    # Check for description columns first (these contain business-friendly names)
+    for desc_col in ['Cluster_Description', 'Segment_Description', 'SegmentDescription']:
+        if desc_col in data.columns:
+            display_col = desc_col
+            # Find the corresponding ID column
+            if 'Cluster_Description' in desc_col and 'Cluster' in data.columns:
+                group_col = 'Cluster'
+            elif 'Segment' in desc_col and segment_col:
+                group_col = segment_col
+            break
+    
+    # If no description column, use the raw segment/cluster column
+    if not display_col:
+        if segment_col:
+            display_col = segment_col
+            group_col = segment_col
+        elif cluster_col:
+            display_col = cluster_col
+            group_col = cluster_col
+    
+    
+    if display_col and group_col:
+        # Get ALL segments (not just top 5) for consistent display
+        if display_col != group_col:
+            # Use description column for display, but group by ID for accuracy
+            segment_map = data[[group_col, display_col]].drop_duplicates().set_index(group_col)[display_col]
+            raw_counts = data[group_col].value_counts()  # Get ALL segments
+            all_segments_counts = pd.Series({
+                segment_map.get(cluster, str(cluster)): count 
+                for cluster, count in raw_counts.items()
+            })
+            # Get top 8 for display consistency between charts
+            top_segments = all_segments_counts.head(8)
+        else:
+            all_segments_counts = data[display_col].value_counts()  # Get ALL segments
+            top_segments = all_segments_counts.head(8)
+        
+        # Revenue by segment using actual segment names with stacking for same descriptions
+        if monetary_col:
+            if display_col != group_col:
+                # Create detailed revenue data for stacked chart
+                revenue_data = data.groupby([group_col, display_col])[monetary_col].sum().reset_index()
+                revenue_data['segment_name'] = revenue_data[display_col]
+                revenue_data['cluster_id'] = revenue_data[group_col].astype(str)
+                
+                # Get aggregated revenue by segment description for ordering
+                segment_totals = revenue_data.groupby('segment_name')[monetary_col].sum().sort_values(ascending=False)
+                
+                # Use top 8 segments by customer count, but show their revenue breakdown
+                selected_segments = top_segments.index[:8]
+                revenue_chart_data = revenue_data[revenue_data['segment_name'].isin(selected_segments)]
+                
+                # Use centralized color mapping for consistency
+                cluster_color_map = get_cluster_color_map()
+                segment_color_map = get_segment_color_map()
+            else:
+                # If display_col same as group_col, no stacking needed
+                revenue_data = data.groupby(display_col)[monetary_col].sum().reset_index()
+                revenue_data['segment_name'] = revenue_data[display_col]
+                revenue_data['cluster_id'] = revenue_data[display_col].astype(str)
+                
+                selected_segments = top_segments.index[:8]
+                revenue_chart_data = revenue_data[revenue_data['segment_name'].isin(selected_segments)]
+                
+                # Use centralized color mapping for consistency
+                cluster_color_map = get_cluster_color_map()
+                segment_color_map = get_segment_color_map()
+        else:
+            revenue_chart_data = pd.DataFrame()
+            cluster_color_map = {}
+            segment_color_map = {}
+            selected_segments = []
+    
+    # Debug output for chart consistency
+    if len(top_segments) > 0 and 'revenue_chart_data' in locals() and not revenue_chart_data.empty:
+        print(f"Pie chart segments: {list(top_segments.index)}")
+        print(f"Revenue chart segments: {list(revenue_chart_data['segment_name'].unique())}")
+        missing_in_revenue = set(top_segments.index) - set(revenue_chart_data['segment_name'].unique())
+        if missing_in_revenue:
+            print(f"⚠️  Segments missing from revenue chart: {missing_in_revenue}")
+        # Show stacking info
+        stacking_info = revenue_chart_data.groupby('segment_name')['cluster_id'].count()
+        segments_with_multiple_clusters = stacking_info[stacking_info > 1]
+        if len(segments_with_multiple_clusters) > 0:
+            print(f"📊 Segments with multiple clusters (stacked): {segments_with_multiple_clusters.to_dict()}")
+    else:
+        top_segments = pd.Series(dtype=int)
+        revenue_chart_data = pd.DataFrame()
+        cluster_color_map = {}
+        segment_color_map = {}
+        selected_segments = []
+    
+    return [
+        # Page Header
+        html.Div([
+            html.H1("Executive Dashboard", className="page-title"),
+            html.P("Key metrics and insights for strategic decision making", className="page-subtitle")
+        ], className="page-header"),
+        
+        # Key Metrics Cards
+        dbc.Row([
+            dbc.Col([
+                html.Div([
+                    html.Div([
+                        html.I(className="fas fa-users metric-icon", style={"color": "#20b2aa"}),
+                        html.H2(f"{total_customers:,}", className="metric-value"),
+                        html.P("Total Customers", className="metric-label")
+                    ])
+                ], className="metric-card")
+            ], xl=3, lg=6, md=6, sm=12, className="mb-4"),
+            
+            dbc.Col([
+                html.Div([
+                    html.Div([
+                        html.I(className="fas fa-layer-group metric-icon", style={"color": "#5f9ea0"}),
+                        html.H2(str(total_clusters), className="metric-value"),
+                        html.P("Customer Segments", className="metric-label")
+                    ])
+                ], className="metric-card")
+            ], xl=3, lg=6, md=6, sm=12, className="mb-4"),
+            
+            dbc.Col([
+                html.Div([
+                    html.Div([
+                        html.I(className="fas fa-dollar-sign metric-icon", style={"color": "#4682b4"}),
+                        html.H2(f"${avg_monetary:,.0f}", className="metric-value"),
+                        html.P("Avg. Customer Value", className="metric-label")
+                    ])
+                ], className="metric-card")
+            ], xl=3, lg=6, md=6, sm=12, className="mb-4"),
+            
+            dbc.Col([
+                html.Div([
+                    html.Div([
+                        html.I(className="fas fa-clock metric-icon", style={"color": "#008b8b"}),
+                        html.H2(f"{avg_recency:.0f}", className="metric-value"),
+                        html.P("Avg. Days Since Purchase", className="metric-label")
+                    ])
+                ], className="metric-card")
+            ], xl=3, lg=6, md=6, sm=12, className="mb-4")
+        ]),
+        
+        # Charts Row
+        dbc.Row([
+            dbc.Col([
+                html.Div([
+                    html.H4("Customer Base Composition", className="mb-3"),
+                    html.P("Understanding your customer segments for targeted strategies", className="text-muted mb-3"),
+                    dcc.Graph(
+                        figure=px.pie(
+                            values=top_segments.values if len(top_segments) > 0 else [1],
+                            names=top_segments.index if len(top_segments) > 0 else ['No Data'],
+                            title="Customer Distribution by Business Segment",
+                            color=top_segments.index if len(top_segments) > 0 else ['No Data'],
+                            color_discrete_map=segment_color_map if len(top_segments) > 0 else {}
+                        ).update_layout(
+                            plot_bgcolor='rgba(0,0,0,0)',
+                            paper_bgcolor='rgba(0,0,0,0)',
+                            font=dict(family="Segoe UI", size=12),
+                            showlegend=True,
+                            legend=dict(orientation="v", yanchor="middle", y=0.5)
+                        )
+                    ) if len(top_segments) > 0 else dcc.Graph(
+                        figure=go.Figure().add_annotation(
+                            text="No segment data available",
+                            xref="paper", yref="paper",
+                            x=0.5, y=0.5, showarrow=False
+                        ).update_layout(
+                            plot_bgcolor='rgba(0,0,0,0)',
+                            paper_bgcolor='rgba(0,0,0,0)'
+                        )
+                    )
+                ], className="chart-container")
+            ], xl=6, lg=12, className="mb-4"),
+            
+            dbc.Col([
+                html.Div([
+                    html.H4("Revenue Performance by Segment", className="mb-3"),
+                    html.P("Identify your most valuable customer groups", className="text-muted mb-3"),
+                    dcc.Graph(
+                        figure=px.bar(
+                            revenue_chart_data if 'revenue_chart_data' in locals() and not revenue_chart_data.empty else pd.DataFrame(),
+                            x='segment_name',
+                            y=monetary_col,
+                            color='segment_name',
+                            title="Revenue Generation by Customer Segment",
+                            color_discrete_map=segment_color_map if 'segment_color_map' in locals() else {},
+                            category_orders={'segment_name': list(selected_segments) if 'selected_segments' in locals() else []}
+                        ).update_layout(
+                            plot_bgcolor='rgba(0,0,0,0)',
+                            paper_bgcolor='rgba(0,0,0,0)',
+                            font=dict(family="Segoe UI", size=12),
+                            xaxis_title="Customer Segment",
+                            yaxis_title="Total Revenue ($)",
+                            legend_title="Cluster ID",
+                            showlegend=True,
+                            legend=dict(
+                                orientation="v",
+                                yanchor="top",
+                                y=1,
+                                xanchor="left",
+                                x=1.02
+                            )
+                        ).update_xaxes(tickangle=45).update_traces(
+                            hovertemplate='<b>%{x}</b><br>' +
+                                        'Cluster: %{fullData.name}<br>' +
+                                        'Revenue: $%{y:,.0f}<extra></extra>'
+                        ) if 'revenue_chart_data' in locals() and not revenue_chart_data.empty else go.Figure().add_annotation(
+                            text="No revenue data available",
+                            xref="paper", yref="paper",
+                            x=0.5, y=0.5, showarrow=False
+                        ).update_layout(
+                            plot_bgcolor='rgba(0,0,0,0)',
+                            paper_bgcolor='rgba(0,0,0,0)'
+                        )
+                    )
+                ], className="chart-container")
+            ], xl=6, lg=12, className="mb-4")
+        ]),
+        
+        # Business Insights and Recommendations
+        dbc.Row([
+            dbc.Col([
+                html.Div([
+                    html.H4("Business Insights & Recommendations", className="mb-3"),
+                    dbc.Row([
+                        dbc.Col([
+                            html.Div([
+                                html.H5([html.I(className="fas fa-clock me-2", style={"color": "#20b2aa"}), "Customer Engagement"], className="mb-3"),
+                                html.P(f"Average time since last purchase: {avg_recency:.1f} days" if recency_col else "N/A", className="mb-2"),
+                                html.P([
+                                    html.Strong("Recommendation: "),
+                                    "Focus on win-back campaigns for customers inactive >30 days" if recency_col and avg_recency > 30 else "Maintain engagement with recent active customers"
+                                ], className="small text-muted")
+                            ])
+                        ], md=4),
+                        dbc.Col([
+                            html.Div([
+                                html.H5([html.I(className="fas fa-shopping-cart me-2", style={"color": "#5f9ea0"}), "Purchase Behavior"], className="mb-3"),
+                                html.P(f"Average orders per customer: {avg_frequency:.1f}" if frequency_col else "N/A", className="mb-2"),
+                                html.P([
+                                    html.Strong("Top Opportunity: "),
+                                    f"Encourage repeat purchases - {((data[frequency_col] == 1).sum() / len(data) * 100):.1f}% are one-time buyers" if frequency_col and not data[frequency_col].isna().all() else "Analyze purchase patterns"
+                                ], className="small text-muted")
+                            ])
+                        ], md=4),
+                        dbc.Col([
+                            html.Div([
+                                html.H5([html.I(className="fas fa-dollar-sign me-2", style={"color": "#4682b4"}), "Revenue Potential"], className="mb-3"),
+                                html.P(f"Average customer value: ${avg_monetary:,.0f}" if monetary_col else "N/A", className="mb-2"),
+                                html.P([
+                                    html.Strong("Strategy: "),
+                                    f"Focus on high-value segments - top 20% customers represent significant revenue opportunity" if monetary_col and not data[monetary_col].isna().all() else "Identify high-value customers"
+                                ], className="small text-muted")
+                            ])
+                        ], md=4)
+                    ])
+                ], className="chart-container")
+            ], width=12)
+        ]),
+        
+        # Top Segment Insights
+        dbc.Row([
+            dbc.Col([
+                html.Div([
+                    html.H4("Key Customer Segments", className="mb-3"),
+                    html.Div([
+                        html.Div([
+                            html.H6(f"🏆 {str(top_segments.index[0])[:30]}..." if len(top_segments) > 0 and len(str(top_segments.index[0])) > 30 else f"🏆 {top_segments.index[0]}" if len(top_segments) > 0 else "🏆 N/A", className="mb-2"),
+                            html.P(f"{top_segments.iloc[0]:,} customers" if len(top_segments) > 0 else "N/A", className="mb-1"),
+                            html.Small("Largest segment - prioritize retention", className="text-muted")
+                        ], className="p-3 border rounded me-3 mb-3", style={"min-width": "200px", "background-color": "#f8f9fa"}),
+                        
+                        html.Div([
+                            html.H6(
+                                f"💰 {str(revenue_chart_data.groupby('segment_name')[monetary_col].sum().sort_values(ascending=False).index[0])[:30]}..." 
+                                if 'revenue_chart_data' in locals() and not revenue_chart_data.empty and len(str(revenue_chart_data.groupby('segment_name')[monetary_col].sum().sort_values(ascending=False).index[0])) > 30 
+                                else f"💰 {revenue_chart_data.groupby('segment_name')[monetary_col].sum().sort_values(ascending=False).index[0]}" 
+                                if 'revenue_chart_data' in locals() and not revenue_chart_data.empty 
+                                else "💰 N/A", 
+                                className="mb-2"
+                            ),
+                            html.P(
+                                f"${revenue_chart_data.groupby('segment_name')[monetary_col].sum().sort_values(ascending=False).iloc[0]:,.0f} revenue" 
+                                if 'revenue_chart_data' in locals() and not revenue_chart_data.empty 
+                                else "N/A", 
+                                className="mb-1"
+                            ),
+                            html.Small("Highest revenue - protect at all costs", className="text-muted")
+                        ], className="p-3 border rounded me-3 mb-3", style={"min-width": "200px", "background-color": "#e0f7fa"}),
+                        
+                        html.Div([
+                            html.H6("📈 Growth Opportunity", className="mb-2"),
+                            html.P(
+                                f"{((pd.to_numeric(data[recency_col], errors='coerce') > safe_numeric_operation(data[recency_col], 'median')) & (pd.to_numeric(data[monetary_col], errors='coerce') > safe_numeric_operation(data[monetary_col], 'median'))).sum():,} customers" 
+                                if recency_col and monetary_col 
+                                else "N/A", 
+                                className="mb-1"
+                            ),
+                            html.Small("High-value but dormant - reactivation target", className="text-muted")
+                        ], className="p-3 border rounded mb-3", style={"min-width": "200px", "background-color": "#e0f2f1"})
+                    ], className="d-flex flex-wrap")
+                ], className="chart-container")
+            ], width=12)
+        ]),
+        
+    ]
+
+# Enhanced segments page with detailed segment analysis
+def create_segments_page():
+    if data is None:
+        return html.Div([
+            dbc.Alert("No data available. Please refresh to load data.", color="warning")
+        ])
+    
+    # Find available columns dynamically
+    segment_col = None
+    for col in ['Segment', 'segment', 'customer_segment', 'segment_name', 'SegmentName', 'Cluster', 'cluster']:
+        if col in data.columns:
+            segment_col = col
+            break
+    
+    customer_col = None
+    for col in ['CustomerID', 'customer_id', 'CustomerId', 'ID', 'id']:
+        if col in data.columns:
+            customer_col = col
+            break
+    
+    monetary_col = None
+    for col in ['Monetary', 'monetary', 'total_spend', 'revenue', 'TotalSpend']:
+        if col in data.columns:
+            monetary_col = col
+            break
+    
+    frequency_col = None
+    for col in ['Frequency', 'frequency', 'order_count', 'purchase_count']:
+        if col in data.columns:
+            frequency_col = col
+            break
+    
+    recency_col = None
+    for col in ['Recency', 'recency', 'days_since_last_purchase']:
+        if col in data.columns:
+            recency_col = col
+            break
+    
+    if not segment_col:
+        return html.Div([
+            dbc.Alert("No segment/cluster column found in data. Available columns: " + ", ".join(data.columns), color="warning")
+        ])
+    
+    # Segment analysis with available columns
+    agg_dict = {}
+    if customer_col:
+        agg_dict[customer_col] = 'count'
+    if monetary_col:
+        agg_dict[monetary_col] = ['mean', 'sum', 'std']
+    if frequency_col:
+        agg_dict[frequency_col] = ['mean', 'std']
+    if recency_col:
+        agg_dict[recency_col] = ['mean', 'std']
+    
+    if not agg_dict:
+        return html.Div([
+            dbc.Alert("No analyzable columns found in data.", color="warning")
+        ])
+    
+    segment_analysis = data.groupby(segment_col).agg(agg_dict).round(2)
+    
+    # Flatten column names
+    new_columns = []
+    for col in segment_analysis.columns:
+        if isinstance(col, tuple):
+            if col[1] == 'count':
+                new_columns.append('Customer_Count')
+            elif col[1] == 'mean' and 'monetary' in col[0].lower():
+                new_columns.append('Avg_Monetary')
+            elif col[1] == 'sum' and 'monetary' in col[0].lower():
+                new_columns.append('Total_Revenue')
+            elif col[1] == 'std' and 'monetary' in col[0].lower():
+                new_columns.append('Monetary_Std')
+            elif col[1] == 'mean' and 'frequency' in col[0].lower():
+                new_columns.append('Avg_Frequency')
+            elif col[1] == 'std' and 'frequency' in col[0].lower():
+                new_columns.append('Frequency_Std')
+            elif col[1] == 'mean' and 'recency' in col[0].lower():
+                new_columns.append('Avg_Recency')
+            elif col[1] == 'std' and 'recency' in col[0].lower():
+                new_columns.append('Recency_Std')
+            else:
+                new_columns.append(f"{col[0]}_{col[1]}")
+        else:
+            new_columns.append(str(col))
+    
+    segment_analysis.columns = new_columns
+    segment_analysis = segment_analysis.reset_index()
+    
+    # Add cluster description and recommendation if available
+    description_cols = ['Cluster_Description', 'SegmentDescription', 'Description']
+    recommendation_cols = ['Cluster_Recommendation', 'SegmentRecommendation', 'Recommendation', 'Strategy']
+    
+    # Find description column
+    desc_col = None
+    for col in description_cols:
+        if col in data.columns:
+            desc_col = col
+            break
+    
+    # Find recommendation column  
+    rec_col = None
+    for col in recommendation_cols:
+        if col in data.columns:
+            rec_col = col
+            break
+    
+    # Add description and recommendation to the analysis
+    if desc_col or rec_col:
+        # Get unique segment descriptions and recommendations
+        segment_info = data[[segment_col] + [col for col in [desc_col, rec_col] if col]].drop_duplicates()
+        segment_info = segment_info.set_index(segment_col)
+        
+        # Merge with segment analysis
+        if desc_col:
+            segment_analysis['Description'] = segment_analysis[segment_col].map(segment_info[desc_col])
+        if rec_col:
+            segment_analysis['Recommendation'] = segment_analysis[segment_col].map(segment_info[rec_col])
+    
+    return [
+        # Page Header
+        html.Div([
+            html.H1("Customer Segments Analysis", className="page-title"),
+            html.P("Detailed analysis of customer segments and their characteristics", className="page-subtitle")
+        ], className="page-header"),
+        
+        # Segment Filters
+        html.Div([
+            html.H5("Segment Filters", className="mb-3"),
+            dbc.Row([
+                dbc.Col([
+                    html.Label("Select Segments:", className="form-label"),
+                    dcc.Dropdown(
+                        id="segment-filter",
+                        options=[],  # Will be populated by callback
+                        value=[],    # Will be populated by callback
+                        multi=True,
+                        placeholder="Select segments to analyze...",
+                        className="mb-3"
+                    ) if segment_col else html.P("No segment data available")
+                ], md=6),
+                dbc.Col([
+                    html.Label("Minimum Customer Count:", className="form-label"),
+                    dcc.Slider(
+                        id="min-customers-slider",
+                        min=1,
+                        max=data[segment_col].value_counts().max() if segment_col else 100,
+                        value=1,
+                        marks={i: str(i) for i in range(0, (data[segment_col].value_counts().max() if segment_col else 100)+1, max(1, (data[segment_col].value_counts().max() if segment_col else 100)//10))},
+                        tooltip={"placement": "bottom", "always_visible": True}
+                    )
+                ], md=6)
+            ])
+        ], className="filter-panel"),
+        
+        # Segment Comparison Table with Descriptions and Recommendations
+        html.Div([
+            html.Div([
+                html.H4("Detailed Segment Analysis", className="mb-3", style={"display": "inline-block"}),
+                html.Div(id="filter-status", className="ms-3", style={"display": "inline-block", "color": "#6c757d"})
+            ], className="d-flex align-items-center mb-3"),
+            html.Div([
+                html.P("Comprehensive analysis including customer metrics", className="text-muted mb-1"),
+                html.Div([
+                    html.Span([html.I(className="fas fa-info-circle me-1", style={"color": "#20b2aa"}), "Descriptions"], className="badge bg-light text-dark me-2") if any(col in data.columns for col in ['Cluster_Description', 'SegmentDescription', 'Description']) else "",
+                    html.Span([html.I(className="fas fa-lightbulb me-1", style={"color": "#5f9ea0"}), "Recommendations"], className="badge bg-light text-dark me-2") if any(col in data.columns for col in ['Cluster_Recommendation', 'SegmentRecommendation', 'Recommendation', 'Strategy']) else "",
+                    html.Span([html.I(className="fas fa-chart-bar me-1", style={"color": "#4682b4"}), "Metrics"], className="badge bg-light text-dark")
+                ], className="mb-3")
+            ]),
+            dag.AgGrid(
+                id="segment-comparison-grid",
+                columnDefs=[
+                    {"field": segment_col, "headerName": "Segment", "pinned": "left", "width": 150},
+                    {"field": "Customer_Count", "headerName": "Customers", "type": "numericColumn", "width": 120},
+                    {"field": "Avg_Monetary", "headerName": "Avg Revenue", "type": "numericColumn", "valueFormatter": {"function": "d3.format('$,.0f')(params.value)"}, "width": 130},
+                    {"field": "Total_Revenue", "headerName": "Total Revenue", "type": "numericColumn", "valueFormatter": {"function": "d3.format('$,.0f')(params.value)"}, "width": 140},
+                    {"field": "Avg_Frequency", "headerName": "Avg Orders", "type": "numericColumn", "width": 120},
+                    {"field": "Avg_Recency", "headerName": "Days Since Purchase", "type": "numericColumn", "width": 150},
+                ] + ([{"field": "Description", "headerName": "Description", "width": 300, "wrapText": True, "autoHeight": True}] if 'Description' in segment_analysis.columns else []) + ([{"field": "Recommendation", "headerName": "Strategy Recommendation", "width": 400, "wrapText": True, "autoHeight": True}] if 'Recommendation' in segment_analysis.columns else []),
+                rowData=segment_analysis.to_dict('records') if not segment_analysis.empty else [],
+                defaultColDef={"sortable": True, "filter": True, "resizable": True, "wrapText": True},
+                dashGridOptions={
+                    "pagination": True, 
+                    "paginationPageSize": 8,
+                    "domLayout": "autoHeight",
+                    "suppressHorizontalScroll": False,
+                    "columnTypes": {
+                        "textColumn": {"wrapText": True, "autoHeight": True}
+                    }
+                },
+                className="ag-theme-alpine",
+                style={"height": "500px", "width": "100%"}
+            )
+        ], className="chart-container")
+    ]
+
+# About page with project information
+def create_about_page():
+    return [
+        # Page Header
+        html.Div([
+            html.H1("About This Project", className="page-title"),
+            html.P("Learn about the data engineering pipeline and RFM analysis methodology", className="page-subtitle")
+        ], className="page-header"),
+        
+        # Project Overview
+        html.Div([
+            html.H4("Project Overview", className="mb-3"),
+            html.P("This is a comprehensive data engineering project that demonstrates the complete data lifecycle from raw data ingestion to machine learning application deployment. The project implements customer segmentation using RFM analysis and K-means clustering for retail transaction data."),
+            
+            html.H5("Key Features", className="mt-4 mb-3"),
+            html.Ul([
+                html.Li("End-to-end data pipeline with automated daily processing"),
+                html.Li("Medallion architecture (Bronze, Silver, Gold) using Delta Lake"),
+                html.Li("RFM customer segmentation with intelligent clustering"),
+                html.Li("Real-time data quality monitoring"),
+                html.Li("Interactive analytics dashboard"),
+                html.Li("Comprehensive data lineage tracking")
+            ]),
+            
+            html.H5("Technology Stack", className="mt-4 mb-3"),
+            dbc.Row([
+                dbc.Col([
+                    html.Div([
+                        html.H6("Data Platform", className="text-muted"),
+                        html.P("Databricks, Delta Lake, Apache Spark")
+                    ])
+                ], md=3),
+                dbc.Col([
+                    html.Div([
+                        html.H6("Storage", className="text-muted"),
+                        html.P("AWS S3, Delta Tables")
+                    ])
+                ], md=3),
+                dbc.Col([
+                    html.Div([
+                        html.H6("Analytics", className="text-muted"),
+                        html.P("Python, Pandas, Plotly, Dash")
+                    ])
+                ], md=3),
+                dbc.Col([
+                    html.Div([
+                        html.H6("ML & Clustering", className="text-muted"),
+                        html.P("scikit-learn, K-means")
+                    ])
+                ], md=3)
+            ])
+        ], className="chart-container")
+    ]
+
+# Landing page layout (redirects to about page)
 def create_landing_page():
+    return create_about_page()
     return [
         # Hero Section
         dbc.Row([
@@ -1511,6 +2427,8 @@ def create_analytics_page():
                 dcc.Tabs(id="analysis-tabs", value="summary", children=[
                     dcc.Tab(label="Segment Summary", value="summary"),
                     dcc.Tab(label="Monetary Analysis", value="monetary"),
+                    dcc.Tab(label="Frequency Analysis", value="frequency"),
+                    dcc.Tab(label="Recency Analysis", value="recency"),
                     dcc.Tab(label="Customer Details", value="details"),
                     dcc.Tab(label="Recommendations", value="recommendations")
                 ]),
@@ -1661,7 +2579,7 @@ def create_architecture_page():
                         html.H6("🎨 Color Legend", className="mb-2"),
                         dbc.Row([
                             dbc.Col([
-                                html.H6("🌟 Core Architecture", className="small fw-bold text-primary mb-2"),
+                                html.H6("🌟 Core Architecture", className="small fw-bold text-primary mb-2 architecture-legend"),
                                 html.Div([
                                     html.Span("🟤", style={'fontSize': '16px', 'marginRight': '8px'}),
                                     html.Span("Bronze Layer", className="small fw-bold")
@@ -1678,9 +2596,9 @@ def create_architecture_page():
                                     html.Span("🟣", style={'fontSize': '16px', 'marginRight': '8px'}),
                                     html.Span("ML Analytics", className="small fw-bold")
                                 ])
-                            ], width=6),
+                            ], width=12, md=6),
                             dbc.Col([
-                                html.H6("🔘 Supporting Layers", className="small fw-bold text-muted mb-2"),
+                                html.H6("🔘 Supporting Layers", className="small fw-bold text-muted mb-2 architecture-legend"),
                                 html.Div([
                                     html.Span("⚫", style={'fontSize': '16px', 'marginRight': '8px'}),
                                     html.Span("Data Ingestion", className="small text-muted")
@@ -1693,7 +2611,7 @@ def create_architecture_page():
                                     html.Span("⚫", style={'fontSize': '16px', 'marginRight': '8px'}),
                                     html.Span("Data Governance", className="small text-muted")
                                 ])
-                            ], width=6)
+                            ], width=12, md=6)
                         ])
                     ])
                 ])
@@ -1730,7 +2648,7 @@ def create_architecture_page():
                                     html.Strong("Implementation: "), 
                                     html.Code("dlt_scripts/01_bronze_layer.py", className="text-muted")
                                 ], className="small")
-                            ], width=4),
+                            ], width=12, lg=4, className="mb-3 mb-lg-0"),
                             dbc.Col([
                                 html.H6("🥈 Silver Layer - Cleaned & Validated", className="text-secondary mb-2"),
                                 html.Ul([
@@ -1743,7 +2661,7 @@ def create_architecture_page():
                                     html.Strong("Implementation: "), 
                                     html.Code("dlt_scripts/02_silver_layer.py", className="text-muted")
                                 ], className="small")
-                            ], width=4),
+                            ], width=12, lg=4, className="mb-3 mb-lg-0"),
                             dbc.Col([
                                 html.H6("🥇 Gold Layer - Business Analytics", className="text-warning mb-2"),
                                 html.Ul([
@@ -1756,7 +2674,7 @@ def create_architecture_page():
                                     html.Strong("Implementation: "), 
                                     html.Code("dlt_scripts/05_customer_rfm_gold.sql", className="text-muted")
                                 ], className="small")
-                            ], width=4)
+                            ], width=12, lg=4, className="mb-3 mb-lg-0")
                         ])
                     ])
                 ])
@@ -1782,7 +2700,7 @@ def create_architecture_page():
                                     html.Li("CloudFiles streaming for real-time processing"),
                                     html.Li("External data source integration")
                                 ])
-                            ], width=6),
+                            ], width=12, md=6, className="mb-3 mb-md-0"),
                             dbc.Col([
                                 html.H6("🔧 Data Processing Layer", className="text-success mb-2"),
                                 html.Ul([
@@ -1791,7 +2709,7 @@ def create_architecture_page():
                                     html.Li("Automated schema evolution and data lineage"),
                                     html.Li("Error handling and data rescue capabilities")
                                 ])
-                            ], width=6)
+                            ], width=12, md=6, className="mb-3 mb-md-0")
                         ], className="mb-3"),
                         
                         dbc.Row([
@@ -1803,7 +2721,7 @@ def create_architecture_page():
                                     html.Li("Optimized storage with auto-compaction"),
                                     html.Li("Unity Catalog for governance and discovery")
                                 ])
-                            ], width=6),
+                            ], width=12, md=6, className="mb-3 mb-md-0"),
                             dbc.Col([
                                 html.H6("📊 Analytics & Application Layer", className="text-danger mb-2"),
                                 html.Ul([
@@ -1812,7 +2730,7 @@ def create_architecture_page():
                                     html.Li("Materialized customer segments for business use"),
                                     html.Li("Interactive dashboard for real-time insights")
                                 ])
-                            ], width=6)
+                            ], width=12, md=6, className="mb-3 mb-md-0")
                         ])
                     ])
                 ])
@@ -2084,94 +3002,774 @@ def create_lineage_page():
         ])
     ]
 
-# Initialize the Dash app
-app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP], suppress_callback_exceptions=True)
+# Centralized color mapping functions for consistent colors across all charts
+def get_cluster_color_map():
+    """Get consistent color mapping for clusters across all charts."""
+    if data is None:
+        return {}
+    
+    # Teal-based color palette optimized for readability
+    color_palette = ['#20b2aa', '#5f9ea0', '#4682b4', '#008b8b', '#2e8b57', '#6495ed', '#40e0d0', '#48d1cc', '#00ced1', '#87ceeb']
+    
+    # Always use cluster IDs as the base for color assignment
+    unique_clusters = sorted(data['Cluster'].unique())
+    cluster_color_map = {cluster: color_palette[i % len(color_palette)] for i, cluster in enumerate(unique_clusters)}
+    
+    return cluster_color_map
+
+def get_segment_color_map():
+    """Get color mapping for segments that maps back to cluster colors."""
+    if data is None:
+        return {}
+    
+    cluster_colors = get_cluster_color_map()
+    segment_color_map = {}
+    
+    # Create a mapping from cluster descriptions back to cluster IDs
+    if 'Cluster_Description' in data.columns:
+        # Map each unique cluster description to its cluster's color
+        cluster_to_desc = data[['Cluster', 'Cluster_Description']].drop_duplicates()
+        for _, row in cluster_to_desc.iterrows():
+            cluster_id = row['Cluster']
+            description = row['Cluster_Description']
+            segment_color_map[description] = cluster_colors.get(cluster_id, '#20b2aa')
+    
+    # Handle other segment column possibilities
+    if 'Segment' in data.columns:
+        segment_to_cluster = data[['Cluster', 'Segment']].drop_duplicates()
+        for _, row in segment_to_cluster.iterrows():
+            cluster_id = row['Cluster']
+            segment = row['Segment']
+            segment_color_map[segment] = cluster_colors.get(cluster_id, '#20b2aa')
+    
+    # Also map raw cluster identifiers for compatibility
+    for cluster_id, color in cluster_colors.items():
+        segment_color_map[cluster_id] = color
+        segment_color_map[str(cluster_id)] = color
+        segment_color_map[f'Cluster {cluster_id}'] = color
+    
+    return segment_color_map
+
+# Initialize the Dash app with modern theme
+app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP, dbc.icons.FONT_AWESOME], suppress_callback_exceptions=True)
 server = app.server  # For deployment
 
-# Define the app layout with navigation
-app.layout = dbc.Container([
-    # Navigation and refresh controls
-    dbc.Row([
-        dbc.Col([
-            dbc.Nav([
-                dbc.NavItem(dbc.NavLink("Project Overview", href="#", id="landing-tab", active=True)),
-                dbc.NavItem(dbc.NavLink("RFM Analytics", href="#", id="analytics-tab", active=False)),
-                dbc.NavItem(dbc.NavLink("Data Quality", href="#", id="quality-tab", active=False)),
-                dbc.NavItem(dbc.NavLink("Data Lineage", href="#", id="lineage-tab", active=False)),
-                dbc.NavItem(dbc.NavLink("Data Architecture", href="#", id="architecture-tab", active=False)),
-            ], pills=True, className="mb-4")
-        ], width=10),
-        dbc.Col([
-            dbc.Button(
-                "🔄 Refresh Data", 
-                id="refresh-button", 
-                color="primary", 
-                size="sm",
-                className="mb-4"
-            )
-        ], width=2, className="text-end")
-    ]),
-    
-    # Refresh status indicator
-    dbc.Row([
-        dbc.Col([
-            html.Div(id="refresh-status")
-        ], width=12)
-    ]),
-    
-    # Page content - start with landing page
-    html.Div(id="page-content", children=[])
-], fluid=True)
+# Custom CSS for modern design
+app.index_string = '''
+<!DOCTYPE html>
+<html>
+    <head>
+        {%metas%}
+        <title>{%title%}</title>
+        {%favicon%}
+        {%css%}
+        <style>
+            body {
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                background-color: #f8f9fa;
+                margin: 0;
+                padding: 0;
+            }
+            .sidebar {
+                background: linear-gradient(135deg, #20b2aa 0%, #008b8b 100%);
+                min-height: 100vh;
+                padding: 0;
+                box-shadow: 2px 0 10px rgba(0,0,0,0.1);
+            }
+            .sidebar-header {
+                padding: 2rem 1rem;
+                text-align: center;
+                border-bottom: 1px solid rgba(255,255,255,0.1);
+                margin-bottom: 1rem;
+            }
+            .sidebar-brand {
+                color: white;
+                font-size: 1.5rem;
+                font-weight: bold;
+                text-decoration: none;
+                display: block;
+                margin-bottom: 0.5rem;
+            }
+            .sidebar-subtitle {
+                color: rgba(255,255,255,0.8);
+                font-size: 0.9rem;
+                margin: 0;
+            }
+            .nav-item {
+                margin-bottom: 0.5rem;
+            }
+            .nav-link {
+                color: rgba(255,255,255,0.9) !important;
+                padding: 0.75rem 1.5rem;
+                border-radius: 0.5rem;
+                margin: 0 1rem;
+                transition: all 0.3s ease;
+                display: flex;
+                align-items: center;
+                text-decoration: none;
+            }
+            .nav-link:hover {
+                background-color: rgba(255,255,255,0.1);
+                color: white !important;
+                transform: translateX(5px);
+            }
+            .nav-link.active {
+                background-color: rgba(255,255,255,0.2);
+                color: white !important;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            }
+            .nav-link i {
+                margin-right: 0.75rem;
+                width: 1.25rem;
+                text-align: center;
+            }
+            .main-content {
+                padding: 2rem;
+                background-color: #f8f9fa;
+                min-height: 100vh;
+            }
+            .metric-card {
+                background: white;
+                border-radius: 1rem;
+                padding: 1.5rem;
+                box-shadow: 0 2px 20px rgba(0,0,0,0.08);
+                border: 1px solid rgba(0,0,0,0.05);
+                transition: transform 0.2s ease, box-shadow 0.2s ease;
+            }
+            .metric-card:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 4px 25px rgba(0,0,0,0.12);
+            }
+            .metric-value {
+                font-size: 2.5rem;
+                font-weight: bold;
+                color: #2c3e50;
+                margin: 0;
+                line-height: 1.2;
+            }
+            .metric-label {
+                color: #6c757d;
+                font-size: 0.9rem;
+                margin-top: 0.5rem;
+                margin-bottom: 0;
+            }
+            .metric-icon {
+                font-size: 2rem;
+                margin-bottom: 1rem;
+            }
+            .page-header {
+                background: white;
+                border-radius: 1rem;
+                padding: 2rem;
+                margin-bottom: 2rem;
+                box-shadow: 0 2px 20px rgba(0,0,0,0.08);
+                border: 1px solid rgba(0,0,0,0.05);
+            }
+            .page-title {
+                color: #2c3e50;
+                font-size: 2rem;
+                font-weight: bold;
+                margin-bottom: 0.5rem;
+            }
+            .page-subtitle {
+                color: #6c757d;
+                font-size: 1.1rem;
+                margin: 0;
+            }
+            .chart-container {
+                background: white;
+                border-radius: 1rem;
+                padding: 1.5rem;
+                box-shadow: 0 2px 20px rgba(0,0,0,0.08);
+                border: 1px solid rgba(0,0,0,0.05);
+                margin-bottom: 2rem;
+            }
+            .refresh-button {
+                background: linear-gradient(135deg, #20b2aa 0%, #008b8b 100%);
+                border: none;
+                border-radius: 0.5rem;
+                color: white;
+                padding: 0.5rem 1rem;
+                font-size: 0.9rem;
+                transition: all 0.3s ease;
+            }
+            .refresh-button:hover {
+                transform: translateY(-1px);
+                box-shadow: 0 4px 15px rgba(32, 178, 170, 0.4);
+            }
+            .loading-spinner {
+                display: inline-block;
+                width: 1rem;
+                height: 1rem;
+                border: 2px solid #f3f3f3;
+                border-top: 2px solid #667eea;
+                border-radius: 50%;
+                animation: spin 1s linear infinite;
+                margin-right: 0.5rem;
+            }
+            @keyframes spin {
+                0% { transform: rotate(0deg); }
+                100% { transform: rotate(360deg); }
+            }
+            .status-success {
+                background-color: #d4edda;
+                color: #155724;
+                border: 1px solid #c3e6cb;
+                border-radius: 0.5rem;
+                padding: 0.75rem 1rem;
+                margin-bottom: 1rem;
+            }
+            .status-error {
+                background-color: #f8d7da;
+                color: #721c24;
+                border: 1px solid #f5c6cb;
+                border-radius: 0.5rem;
+                padding: 0.75rem 1rem;
+                margin-bottom: 1rem;
+            }
+            .filter-panel {
+                background: white;
+                border-radius: 1rem;
+                padding: 1.5rem;
+                box-shadow: 0 2px 20px rgba(0,0,0,0.08);
+                border: 1px solid rgba(0,0,0,0.05);
+                margin-bottom: 2rem;
+            }
+            /* Responsive Design */
+            @media (max-width: 1200px) {
+                .sidebar {
+                    width: 250px;
+                }
+                .main-content {
+                    margin-left: 250px;
+                }
+            }
+            
+            @media (max-width: 992px) {
+                .sidebar {
+                    position: fixed;
+                    top: 0;
+                    left: -250px;
+                    width: 250px;
+                    transition: left 0.3s ease;
+                    z-index: 1000;
+                }
+                .sidebar.open {
+                    left: 0;
+                }
+                .main-content {
+                    margin-left: 0 !important;
+                    padding: 1rem;
+                }
+                .page-header {
+                    padding: 1.5rem;
+                    margin-bottom: 1.5rem;
+                }
+                .page-title {
+                    font-size: 1.75rem;
+                }
+                .chart-container {
+                    padding: 1rem;
+                    margin-bottom: 1.5rem;
+                }
+            }
+            
+            @media (max-width: 768px) {
+                .main-content {
+                    padding: 0.75rem;
+                    padding-top: 4rem; /* Account for mobile menu button */
+                }
+                .metric-card {
+                    margin-bottom: 1rem;
+                    padding: 1rem;
+                }
+                .metric-value {
+                    font-size: 2rem;
+                }
+                .page-header {
+                    padding: 1rem;
+                    margin-bottom: 1rem;
+                }
+                .page-title {
+                    font-size: 1.5rem;
+                }
+                .chart-container {
+                    padding: 0.75rem;
+                    margin-bottom: 1rem;
+                }
+                .filter-panel {
+                    padding: 1rem;
+                    margin-bottom: 1rem;
+                }
+                /* Responsive tables */
+                .ag-theme-alpine {
+                    font-size: 12px;
+                }
+                /* Better touch targets */
+                .nav-link {
+                    padding: 1rem 1.5rem;
+                    font-size: 1rem;
+                    min-height: 44px; /* iOS touch target recommendation */
+                }
+                .refresh-button {
+                    padding: 0.75rem 1rem;
+                    font-size: 1rem;
+                    min-height: 44px;
+                }
+                /* Mobile menu improvements */
+                #mobile-menu-toggle {
+                    min-width: 44px;
+                    min-height: 44px;
+                }
+            }
+            
+            @media (max-width: 576px) {
+                .main-content {
+                    padding: 0.5rem;
+                    padding-top: 4rem;
+                }
+                .metric-card {
+                    padding: 0.75rem;
+                }
+                .metric-value {
+                    font-size: 1.75rem;
+                }
+                .page-header {
+                    padding: 0.75rem;
+                }
+                .page-title {
+                    font-size: 1.25rem;
+                }
+                .chart-container {
+                    padding: 0.5rem;
+                }
+                .filter-panel {
+                    padding: 0.75rem;
+                }
+                /* Stack metric cards vertically on small screens */
+                .row .col-lg-3, .row .col-md-4, .row .col-sm-6 {
+                    margin-bottom: 0.75rem;
+                }
+                /* Mobile-specific architecture adjustments */
+                #architecture-flow-cytoscape {
+                    height: 350px !important;
+                    font-size: 10px !important;
+                }
+                /* Make text in architecture diagram smaller on mobile */
+                .architecture-legend {
+                    font-size: 0.75rem;
+                }
+                .card-header h4 {
+                    font-size: 1.1rem;
+                }
+            }
+        </style>
+    </head>
+    <body>
+        {%app_entry%}
+        <footer>
+            {%config%}
+            {%scripts%}
+            {%renderer%}
+        </footer>
+    </body>
+</html>
+'''
 
-# Callbacks
+# Define the modern app layout with sidebar navigation
+app.layout = html.Div([
+    dcc.Store(id='active-tab-store', data='dashboard'),
+    dcc.Store(id='data-refresh-store', data={'timestamp': datetime.now().isoformat()}),
+    
+    # Mobile menu toggle (hidden on desktop)
+    html.Div([
+        dbc.Button(
+            html.I(className="fas fa-bars"),
+            id="mobile-menu-toggle",
+            className="d-md-none",
+            style={"position": "fixed", "top": "1rem", "left": "1rem", "z-index": "1001", "background": "linear-gradient(135deg, #20b2aa 0%, #008b8b 100%)", "border": "none"}
+        )
+    ]),
+    
+    # Sidebar Navigation
+    html.Div([
+        # Sidebar Header
+        html.Div([
+            html.A("RFM Analytics", className="sidebar-brand", href="#"),
+            html.P("Customer Intelligence Dashboard", className="sidebar-subtitle")
+        ], className="sidebar-header"),
+        
+        # Navigation Menu
+        dbc.Nav([
+            dbc.NavItem(dbc.NavLink([
+                html.I(className="fas fa-tachometer-alt"),
+                " Executive Dashboard"
+            ], href="#", id="dashboard-tab", active=True, className="nav-link")),
+            
+            dbc.NavItem(dbc.NavLink([
+                html.I(className="fas fa-chart-scatter"),
+                " RFM Analytics"
+            ], href="#", id="analytics-tab", active=False, className="nav-link")),
+            
+            dbc.NavItem(dbc.NavLink([
+                html.I(className="fas fa-users"),
+                " Customer Segments"
+            ], href="#", id="segments-tab", active=False, className="nav-link")),
+            
+            dbc.NavItem(dbc.NavLink([
+                html.I(className="fas fa-shield-alt"),
+                " Data Quality"
+            ], href="#", id="quality-tab", active=False, className="nav-link")),
+            
+            dbc.NavItem(dbc.NavLink([
+                html.I(className="fas fa-project-diagram"),
+                " Data Lineage"
+            ], href="#", id="lineage-tab", active=False, className="nav-link")),
+            
+            dbc.NavItem(dbc.NavLink([
+                html.I(className="fas fa-layer-group"),
+                " Architecture"
+            ], href="#", id="architecture-tab", active=False, className="nav-link")),
+            
+            dbc.NavItem(dbc.NavLink([
+                html.I(className="fas fa-info-circle"),
+                " About Project"
+            ], href="#", id="about-tab", active=False, className="nav-link"))
+        ], vertical=True, className="flex-column"),
+        
+        # Sidebar Footer with Refresh Button
+        html.Div([
+            dbc.Button([
+                html.I(className="fas fa-sync-alt", id="refresh-icon"),
+                " Refresh Data"
+            ], id="refresh-button", className="refresh-button w-100", size="sm"),
+            
+            html.Div(id="refresh-status", className="mt-2"),
+            
+            html.Hr(style={"border-color": "rgba(255,255,255,0.1)", "margin": "1rem 0"}),
+            
+            html.Div([
+                html.P([
+                    html.I(className="fas fa-database", style={"margin-right": "0.5rem"}),
+                    "Last Updated: ",
+                    html.Span(id="last-updated", children=datetime.now().strftime("%H:%M:%S"))
+                ], className="small text-light mb-2"),
+                
+                html.P([
+                    html.I(className="fas fa-chart-line", style={"margin-right": "0.5rem"}),
+                    "Total Customers: ",
+                    html.Span(id="total-customers", children=str(len(data)) if data is not None else "0")
+                ], className="small text-light mb-0")
+            ], style={"padding": "0 1rem"})
+        ], style={"position": "absolute", "bottom": "2rem", "left": "0", "right": "0", "padding": "0 1rem"})
+    ], className="sidebar", id="sidebar", style={"position": "fixed", "left": "0", "top": "0", "width": "280px", "height": "100vh", "z-index": "1000"}),
+    
+    # Main Content Area
+    html.Div([
+        html.Div(id="page-content", children=[])
+    ], className="main-content", style={"margin-left": "280px", "min-height": "100vh"})
+])
+
+# Enhanced callback for navigation and refresh
 @app.callback(
     [Output('refresh-status', 'children'),
-     Output('landing-tab', 'active'),
+     Output('refresh-icon', 'className'),
+     Output('last-updated', 'children'),
+     Output('total-customers', 'children'),
+     Output('dashboard-tab', 'active'),
      Output('analytics-tab', 'active'),
+     Output('segments-tab', 'active'),
      Output('quality-tab', 'active'),
      Output('lineage-tab', 'active'),
      Output('architecture-tab', 'active'),
+     Output('about-tab', 'active'),
+     Output('active-tab-store', 'data'),
      Output('page-content', 'children')],
     [Input('refresh-button', 'n_clicks'),
-     Input('landing-tab', 'n_clicks'),
+     Input('dashboard-tab', 'n_clicks'),
      Input('analytics-tab', 'n_clicks'),
+     Input('segments-tab', 'n_clicks'),
      Input('quality-tab', 'n_clicks'),
      Input('lineage-tab', 'n_clicks'),
-     Input('architecture-tab', 'n_clicks')]
+     Input('architecture-tab', 'n_clicks'),
+     Input('about-tab', 'n_clicks')],
+    [State('active-tab-store', 'data')]
 )
-def update_page(refresh_clicks, landing_clicks, analytics_clicks, quality_clicks, lineage_clicks, architecture_clicks):
+def update_page(refresh_clicks, dashboard_clicks, analytics_clicks, segments_clicks, quality_clicks, lineage_clicks, architecture_clicks, about_clicks, current_tab):
     ctx = callback_context
     
     refresh_status = ""
+    refresh_icon = "fas fa-sync-alt"
+    last_updated = datetime.now().strftime("%H:%M:%S")
+    total_customers = str(len(data)) if data is not None else "0"
     
     # Handle refresh button click
     if ctx.triggered and ctx.triggered[0]['prop_id'] == 'refresh-button.n_clicks':
         refresh_all_data()
-        refresh_status = dbc.Alert("✅ Data refreshed successfully!", color="success", dismissable=True, duration=4000)
+        refresh_status = html.Div([
+            html.I(className="fas fa-check-circle", style={"margin-right": "0.5rem"}),
+            "Data refreshed successfully!"
+        ], className="status-success")
+        refresh_icon = "fas fa-sync-alt"
+        last_updated = datetime.now().strftime("%H:%M:%S")
+        total_customers = str(len(data)) if data is not None else "0"
+        # Keep current tab after refresh
+        button_id = current_tab if current_tab else 'dashboard-tab'
+    else:
+        # Get which button was clicked
+        if ctx.triggered:
+            button_id = ctx.triggered[0]['prop_id'].split('.')[0]
+        else:
+            button_id = 'dashboard-tab'  # Default to dashboard
     
-    # If no button has been clicked yet, show landing page
-    if not ctx.triggered:
-        return refresh_status, True, False, False, False, False, create_landing_page()
+    # Reset all tab states
+    dashboard_active = False
+    analytics_active = False
+    segments_active = False
+    quality_active = False
+    lineage_active = False
+    architecture_active = False
+    about_active = False
     
-    # Get which button was clicked
-    button_id = ctx.triggered[0]['prop_id'].split('.')[0]
-    
-    if button_id == 'landing-tab':
-        return refresh_status, True, False, False, False, False, create_landing_page()
+    # Set active tab and create content
+    if button_id == 'dashboard-tab':
+        dashboard_active = True
+        page_content = create_dashboard_page()
+        active_tab = 'dashboard-tab'
     elif button_id == 'analytics-tab':
-        return refresh_status, False, True, False, False, False, create_analytics_page()
+        analytics_active = True
+        page_content = create_analytics_page()
+        active_tab = 'analytics-tab'
+    elif button_id == 'segments-tab':
+        segments_active = True
+        page_content = create_segments_page()
+        active_tab = 'segments-tab'
     elif button_id == 'quality-tab':
-        return refresh_status, False, False, True, False, False, create_quality_page()
+        quality_active = True
+        page_content = create_quality_page()
+        active_tab = 'quality-tab'
     elif button_id == 'lineage-tab':
-        return refresh_status, False, False, False, True, False, create_lineage_page()
+        lineage_active = True
+        page_content = create_lineage_page()
+        active_tab = 'lineage-tab'
     elif button_id == 'architecture-tab':
-        return refresh_status, False, False, False, False, True, create_architecture_page()
-    elif button_id == 'refresh-button':
-        # Keep current page active after refresh
-        return refresh_status, True, False, False, False, False, create_landing_page()
+        architecture_active = True
+        page_content = create_architecture_page()
+        active_tab = 'architecture-tab'
+    elif button_id == 'about-tab':
+        about_active = True
+        page_content = create_about_page()
+        active_tab = 'about-tab'
+    else:
+        dashboard_active = True
+        page_content = create_dashboard_page()
+        active_tab = 'dashboard-tab'
     
-    # Default to landing page
-    return refresh_status, True, False, False, False, False, create_landing_page()
+    return (
+        refresh_status, refresh_icon, last_updated, total_customers,
+        dashboard_active, analytics_active, segments_active, 
+        quality_active, lineage_active, architecture_active, about_active,
+        active_tab, page_content
+    )
+
+# Mobile menu toggle callback
+@app.callback(
+    Output('sidebar', 'style'),
+    [Input('mobile-menu-toggle', 'n_clicks')],
+    [State('sidebar', 'style')]
+)
+def toggle_mobile_menu(n_clicks, current_style):
+    if not n_clicks:
+        return {"position": "fixed", "left": "0", "top": "0", "width": "280px", "height": "100vh", "z-index": "1000"}
+    
+    # Toggle the sidebar visibility on mobile
+    if current_style and 'left' in current_style:
+        if current_style['left'] == '0':
+            return {"position": "fixed", "left": "-280px", "top": "0", "width": "280px", "height": "100vh", "z-index": "1000"}
+        else:
+            return {"position": "fixed", "left": "0", "top": "0", "width": "280px", "height": "100vh", "z-index": "1000"}
+    
+    return {"position": "fixed", "left": "0", "top": "0", "width": "280px", "height": "100vh", "z-index": "1000"}
+
+# Segment filter callback
+@app.callback(
+    Output('segment-comparison-grid', 'rowData'),
+    [Input('segment-filter', 'value'),
+     Input('min-customers-slider', 'value')]
+)
+def update_segment_filters(selected_segments, min_customers):
+    if data is None:
+        return []
+    
+    # Find segment column
+    segment_col = None
+    for col in ['Segment', 'segment', 'customer_segment', 'segment_name', 'SegmentName', 'Cluster', 'cluster']:
+        if col in data.columns:
+            segment_col = col
+            break
+    
+    if not segment_col or not selected_segments:
+        return []
+    
+    # Filter data based on selections
+    filtered_data = data[data[segment_col].isin(selected_segments)]
+    
+    # Find other columns
+    customer_col = next((col for col in ['CustomerID', 'customer_id', 'CustomerId', 'ID', 'id'] if col in data.columns), None)
+    monetary_col = next((col for col in ['Monetary', 'monetary', 'total_spend', 'revenue', 'TotalSpend'] if col in data.columns), None)
+    frequency_col = next((col for col in ['Frequency', 'frequency', 'order_count', 'purchase_count'] if col in data.columns), None)
+    recency_col = next((col for col in ['Recency', 'recency', 'days_since_last_purchase'] if col in data.columns), None)
+    
+    # Create aggregation dictionary
+    agg_dict = {}
+    if customer_col:
+        agg_dict[customer_col] = 'count'
+    if monetary_col:
+        agg_dict[monetary_col] = ['mean', 'sum', 'std']
+    if frequency_col:
+        agg_dict[frequency_col] = ['mean', 'std']
+    if recency_col:
+        agg_dict[recency_col] = ['mean', 'std']
+    
+    if not agg_dict:
+        return []
+    
+    # Perform aggregation
+    segment_analysis = filtered_data.groupby(segment_col).agg(agg_dict).round(2)
+    
+    # Flatten column names
+    new_columns = []
+    for col in segment_analysis.columns:
+        if isinstance(col, tuple):
+            if col[1] == 'count':
+                new_columns.append('Customer_Count')
+            elif col[1] == 'mean' and monetary_col and monetary_col.lower() in col[0].lower():
+                new_columns.append('Avg_Monetary')
+            elif col[1] == 'sum' and monetary_col and monetary_col.lower() in col[0].lower():
+                new_columns.append('Total_Revenue')
+            elif col[1] == 'std' and monetary_col and monetary_col.lower() in col[0].lower():
+                new_columns.append('Monetary_Std')
+            elif col[1] == 'mean' and frequency_col and frequency_col.lower() in col[0].lower():
+                new_columns.append('Avg_Frequency')
+            elif col[1] == 'std' and frequency_col and frequency_col.lower() in col[0].lower():
+                new_columns.append('Frequency_Std')
+            elif col[1] == 'mean' and recency_col and recency_col.lower() in col[0].lower():
+                new_columns.append('Avg_Recency')
+            elif col[1] == 'std' and recency_col and recency_col.lower() in col[0].lower():
+                new_columns.append('Recency_Std')
+            else:
+                new_columns.append(f"{col[0]}_{col[1]}")
+        else:
+            new_columns.append(str(col))
+    
+    segment_analysis.columns = new_columns
+    segment_analysis = segment_analysis.reset_index()
+    
+    # Add description and recommendation if available
+    description_cols = ['Cluster_Description', 'SegmentDescription', 'Description']
+    recommendation_cols = ['Cluster_Recommendation', 'SegmentRecommendation', 'Recommendation', 'Strategy']
+    
+    # Find description column
+    desc_col = None
+    for col in description_cols:
+        if col in data.columns:
+            desc_col = col
+            break
+    
+    # Find recommendation column  
+    rec_col = None
+    for col in recommendation_cols:
+        if col in data.columns:
+            rec_col = col
+            break
+    
+    # Add description and recommendation to the analysis
+    if desc_col or rec_col:
+        # Get unique segment descriptions and recommendations
+        segment_info = data[[segment_col] + [col for col in [desc_col, rec_col] if col]].drop_duplicates()
+        segment_info = segment_info.set_index(segment_col)
+        
+        # Merge with segment analysis
+        if desc_col:
+            segment_analysis['Description'] = segment_analysis[segment_col].map(segment_info[desc_col])
+        if rec_col:
+            segment_analysis['Recommendation'] = segment_analysis[segment_col].map(segment_info[rec_col])
+    
+    # Filter by minimum customer count
+    if 'Customer_Count' in segment_analysis.columns:
+        segment_analysis = segment_analysis[segment_analysis['Customer_Count'] >= min_customers]
+    
+    return segment_analysis.to_dict('records')
+
+# Update segment filter options when page loads
+@app.callback(
+    [Output('segment-filter', 'options'),
+     Output('segment-filter', 'value')],
+    [Input('active-tab-store', 'data')]
+)
+def update_segment_filter_options(active_tab):
+    if data is None or active_tab != 'segments-tab':
+        return [], []
+    
+    # Find segment column
+    segment_col = None
+    for col in ['Segment', 'segment', 'customer_segment', 'segment_name', 'SegmentName', 'Cluster', 'cluster']:
+        if col in data.columns:
+            segment_col = col
+            break
+    
+    if not segment_col:
+        return [], []
+    
+    unique_segments = sorted(data[segment_col].unique())
+    options = [{'label': str(segment), 'value': segment} for segment in unique_segments]
+    
+    return options, unique_segments
+
+# Update min customers slider based on data
+@app.callback(
+    [Output('min-customers-slider', 'max'),
+     Output('min-customers-slider', 'marks'),
+     Output('min-customers-slider', 'value')],
+    [Input('active-tab-store', 'data')]
+)
+def update_min_customers_slider(active_tab):
+    if data is None or active_tab != 'segments-tab':
+        return 100, {}, 1
+    
+    # Find segment column
+    segment_col = None
+    for col in ['Segment', 'segment', 'customer_segment', 'segment_name', 'SegmentName', 'Cluster', 'cluster']:
+        if col in data.columns:
+            segment_col = col
+            break
+    
+    if not segment_col:
+        return 100, {}, 1
+    
+    max_customers = data[segment_col].value_counts().max()
+    step = max(1, max_customers // 10)
+    marks = {i: str(i) for i in range(0, max_customers + 1, step)}
+    
+    return max_customers, marks, 1
+
+# Update filter status
+@app.callback(
+    Output('filter-status', 'children'),
+    [Input('segment-filter', 'value'),
+     Input('min-customers-slider', 'value')]
+)
+def update_filter_status(selected_segments, min_customers):
+    if not selected_segments:
+        return "No segments selected"
+    
+    status_parts = []
+    status_parts.append(f"{len(selected_segments)} segment(s) selected")
+    
+    if min_customers > 1:
+        status_parts.append(f"min {min_customers} customers")
+    
+    return " | ".join(status_parts)
 
 @app.callback(
     Output('3d-scatter', 'figure'),
@@ -2206,6 +3804,12 @@ def render_tab_content(active_tab):
     
     elif active_tab == "monetary":
         return dcc.Graph(figure=create_monetary_analysis())
+    
+    elif active_tab == "frequency":
+        return dcc.Graph(figure=create_frequency_analysis())
+    
+    elif active_tab == "recency":
+        return dcc.Graph(figure=create_recency_analysis())
     
     elif active_tab == "details":
         return dag.AgGrid(
@@ -2288,7 +3892,7 @@ def display_architecture_node_info(selected_nodes):
     return dbc.Card([
         dbc.CardHeader([
             html.H5(f"📋 {node_label.split()[0]} Details", className="mb-0")
-        ], color=color, inverse=True),
+        ]),
         dbc.CardBody([
             html.P([
                 html.Strong("Component: "), 
@@ -2379,6 +3983,22 @@ def update_comparison_table(selected_date):
 )
 def render_data_contract_content(active_tab):
     return create_data_contract_content(active_tab)
+
+# Performance optimization: Add caching for expensive computations
+from functools import lru_cache
+
+@lru_cache(maxsize=32)
+def get_cached_segment_analysis():
+    """Cache expensive segment analysis computations."""
+    if data is None:
+        return pd.DataFrame()
+    
+    return data.groupby('Segment').agg({
+        'CustomerID': 'count',
+        'Monetary': ['mean', 'sum', 'std'],
+        'Frequency': ['mean', 'std'],
+        'Recency': ['mean', 'std']
+    }).round(2)
 
 if __name__ == "__main__":
     app.run(debug=True, host='0.0.0.0', port=int(os.environ.get('PORT', 8050)))
